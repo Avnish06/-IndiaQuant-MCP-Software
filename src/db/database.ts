@@ -1,6 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const dbPath = path.resolve(__dirname, '../../data/portfolio.db');
 
 // Ensure directory exists
@@ -20,6 +25,10 @@ db.exec(`
     qty INTEGER NOT NULL,
     avg_price REAL NOT NULL,
     side TEXT NOT NULL, -- 'BUY' or 'SELL'
+    stop_loss REAL,
+    target REAL,
+    status TEXT DEFAULT 'OPEN', -- 'OPEN' or 'CLOSED'
+    close_price REAL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 

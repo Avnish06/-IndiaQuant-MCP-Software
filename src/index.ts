@@ -6,10 +6,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import dotenv from 'dotenv';
 
-import { MarketDataEngine } from './modules/marketData';
-import { SignalGenerator } from './modules/signalGenerator';
-import { OptionsAnalyzer } from './modules/optionsAnalyzer';
-import { PortfolioManager } from './modules/portfolioManager';
+import { MarketDataEngine } from './modules/marketData.js';
+import { SignalGenerator } from './modules/signalGenerator.js';
+import { OptionsAnalyzer } from './modules/optionsAnalyzer.js';
+import { PortfolioManager } from './modules/portfolioManager.js';
 
 dotenv.config();
 
@@ -81,6 +81,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             symbol: { type: "string" },
+            timeframe: { type: "string", description: "Timeframe (e.g., 1d, 1h, 5m)", default: "1d" },
           },
           required: ["symbol"],
         },
@@ -99,6 +100,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             symbol: { type: "string" },
             qty: { type: "number" },
             side: { type: "string", enum: ["BUY", "SELL"] },
+            stopLoss: { type: "number", description: "Stop loss price" },
+            target: { type: "number", description: "Target price" },
           },
           required: ["symbol", "qty", "side"],
         },
@@ -144,9 +147,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Get performance heatmap of major sectors",
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        name: "get_macro_indicators",
+        description: "Fetch macroeconomic indicators (Inflation, Real GDP) from Alpha Vantage",
+        inputSchema: { type: "object", properties: {} },
+      },
     ],
   };
-});
+})
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
@@ -160,11 +168,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "analyze_sentiment":
         return formatResult(await signalGen.analyzeSentiment(args?.symbol as string));
       case "generate_signal":
-        return formatResult(await signalGen.generateSignal(args?.symbol as string));
+        return formatResult(await signalGen.generateSignal(args?.symbol as string, args?.timeframe as string));
       case "get_portfolio_pnl":
         return formatResult(await portfolioManager.getPortfolioPnL());
       case "place_virtual_trade":
-        return formatResult(await portfolioManager.placeTrade(args?.symbol as string, args?.qty as number, args?.side as 'BUY' | 'SELL'));
+        return formatResult(await portfolioManager.placeTrade(
+          args?.symbol as string,
+          args?.qty as number,
+          args?.side as 'BUY' | 'SELL',
+          args?.stopLoss as number,
+          args?.target as number
+        ));
       case "calculate_greeks":
         return formatResult(await optionsAnalyzer.calculateGreeks(args?.symbol as string, args?.strike as number, args?.type as 'call' | 'put', args?.expiry as string));
       case "detect_unusual_activity":
@@ -173,6 +187,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return formatResult(await marketData.scanMarket({ rsiBelow: args?.rsiBelow as number, rsiAbove: args?.rsiAbove as number }));
       case "get_sector_heatmap":
         return formatResult(await marketData.getSectorHeatmap());
+      case "get_macro_indicators":
+        return formatResult(await marketData.getMacroIndicators());
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

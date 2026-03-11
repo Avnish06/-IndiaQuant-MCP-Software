@@ -1,5 +1,5 @@
 import yahooFinance from 'yahoo-finance2';
-import { BlackScholes } from '../utils/blackScholes';
+import { BlackScholes } from '../utils/blackScholes.js';
 
 export interface OptionContract {
   strike: number;
@@ -27,7 +27,15 @@ export interface OptionsChain {
   maxPain: number;
 }
 
+/**
+ * Analyzer for options chain data, Greeks calculation, and unusual activity detection.
+ */
 export class OptionsAnalyzer {
+  /**
+   * Formats the symbol for Yahoo Finance compatibility.
+   * @param symbol Raw stock symbol
+   * @returns Formatted symbol
+   */
   private formatSymbol(symbol: string): string {
     const s = symbol.toUpperCase();
     if (s.startsWith('^')) return s;
@@ -35,6 +43,13 @@ export class OptionsAnalyzer {
     return `${s}.NS`;
   }
 
+  /**
+   * Fetches and parses the options chain for a given symbol and expiry.
+   * Implements custom Max Pain calculation.
+   * @param symbol Stock symbol
+   * @param expiry Optional expiry date (YYYY-MM-DD)
+   * @returns Parsed options chain with strikes and OI
+   */
   async getOptionsChain(symbol: string, expiry?: string | Date): Promise<OptionsChain> {
     const formattedSymbol = this.formatSymbol(symbol);
     try {
@@ -46,8 +61,8 @@ export class OptionsAnalyzer {
         throw new Error(`No options data found for ${symbol}`);
       }
 
-      const underlyingPrice = result.quote.regularMarketPrice || 0;
-      const optionSet = result.options[0]; // Currently available expiry
+      const underlyingPrice = result.quote?.regularMarketPrice || 0;
+      const optionSet = result.options[0];
       
       const calls: OptionContract[] = (optionSet.calls as any[]).map(c => ({
         strike: c.strike,
@@ -75,18 +90,25 @@ export class OptionsAnalyzer {
 
       return {
         symbol,
-        expiry: optionSet.expirationDate ? new Date(optionSet.expirationDate) : new Date(), // Ensure expiry is a Date object
+        expiry: optionSet.expirationDate ? new Date(optionSet.expirationDate) : new Date(),
         underlyingPrice,
         calls,
         puts,
         maxPain,
       };
     } catch (error: any) {
-      console.error(`Error fetching options chain for ${symbol}:`, error.message);
+      console.error(`Error fetching options chain for ${symbol}:`, error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
 
+  /**
+   * Calculates the Max Pain point for an options chain.
+   * The strike where option buyers lose the most (and sellers gain most).
+   * @param calls List of call contracts
+   * @param puts List of put contracts
+   * @returns The Max Pain strike price
+   */
   private calculateMaxPain(calls: OptionContract[], puts: OptionContract[]): number {
     const strikes = Array.from(new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])).sort((a, b) => a - b);
     
@@ -96,14 +118,12 @@ export class OptionsAnalyzer {
     for (const strike of strikes) {
       let totalLoss = 0;
 
-      // Losses for call buyers if price settles at 'strike'
       for (const call of calls) {
         if (strike > call.strike) {
           totalLoss += (strike - call.strike) * call.openInterest;
         }
       }
 
-      // Losses for put buyers if price settles at 'strike'
       for (const put of puts) {
         if (strike < put.strike) {
           totalLoss += (put.strike - strike) * put.openInterest;
@@ -119,6 +139,14 @@ export class OptionsAnalyzer {
     return maxPainStrike;
   }
 
+  /**
+   * Calculates Black-Scholes Greeks for a specific option contract.
+   * @param symbol Stock symbol
+   * @param strike Strike price
+   * @param type 'call' or 'put'
+   * @param expiry Expiry date
+   * @returns Object containing Delta, Gamma, Theta, Vega
+   */
   async calculateGreeks(symbol: string, strike: number, type: 'call' | 'put', expiry: string | Date): Promise<any> {
     const chain = await this.getOptionsChain(symbol, expiry);
     const contracts = type === 'call' ? chain.calls : chain.puts;
@@ -126,12 +154,9 @@ export class OptionsAnalyzer {
 
     if (!contract) throw new Error(`Contract not found for strike ${strike}`);
 
-    // Time to expiry in years
     const now = new Date();
     const expiryDate = new Date(chain.expiry);
     const T = (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 365);
-    
-    // Risk free rate (approximate for India)
     const r = 0.07; 
 
     return BlackScholes.calculateGreeks(
@@ -139,17 +164,22 @@ export class OptionsAnalyzer {
       strike,
       T,
       r,
-      contract.impliedVolatility || 0.2, // Default to 20% if not available
+      contract.impliedVolatility || 0.2,
       type
     );
   }
 
+  /**
+   * Detects abnormal options activity based on Volume vs Open Interest.
+   * @param symbol Stock symbol
+   * @returns List of contracts with unusual activity alerts
+   */
   async detectUnusualActivity(symbol: string): Promise<any[]> {
     const chain = await this.getOptionsChain(symbol);
     const allOptions = [...chain.calls, ...chain.puts];
     
     const alerts = allOptions
-      .filter(opt => opt.volume > opt.openInterest && opt.volume > 100) // Unusual volume relative to OI
+      .filter(opt => opt.volume > opt.openInterest && opt.volume > 100)
       .map(opt => ({
         strike: opt.strike,
         type: opt.type,
